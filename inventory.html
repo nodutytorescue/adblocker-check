@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Third-Party Service Inventory</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, sans-serif; color: #1a1a1a; background: #f8f9fa; }
+
+  header { background: #fff; border-bottom: 1px solid #ddd; padding: 1rem 1.5rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+  header h1 { font-size: 1.2rem; }
+  header p { color: #666; font-size: .85rem; flex-basis: 100%; }
+
+  .toolbar { background: #fff; border-bottom: 1px solid #eee; padding: .6rem 1.5rem; display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
+  .toolbar input[type="text"] { padding: .4rem .75rem; border: 1px solid #ccc; border-radius: 6px; font-size: .9rem; width: 260px; }
+  .toolbar select { padding: .4rem .75rem; border: 1px solid #ccc; border-radius: 6px; font-size: .9rem; }
+  .toolbar button { padding: .4rem 1rem; border: none; border-radius: 6px; font-size: .85rem; cursor: pointer; font-weight: 600; }
+  #btn-import { background: #0066ff; color: #fff; }
+  #btn-export-csv { background: #e9ecef; color: #333; }
+  .file-drop { border: 2px dashed #ccc; border-radius: 6px; padding: .4rem .75rem; font-size: .85rem; color: #666; cursor: pointer; }
+  .file-drop.drag-over { border-color: #0066ff; background: #f0f6ff; }
+
+  .stats { display: flex; gap: 1rem; padding: .75rem 1.5rem; background: #fff; border-bottom: 1px solid #eee; flex-wrap: wrap; }
+  .stat { font-size: .85rem; color: #555; }
+  .stat strong { color: #1a1a1a; }
+
+  main { padding: 1rem 1.5rem; }
+
+  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.08); font-size: .85rem; }
+  thead { background: #f1f3f5; }
+  th { padding: .6rem .75rem; text-align: left; font-weight: 600; border-bottom: 2px solid #ddd; white-space: nowrap; cursor: pointer; user-select: none; }
+  th:hover { background: #e9ecef; }
+  th .sort-icon { opacity: .4; margin-left: 4px; }
+  th.sorted .sort-icon { opacity: 1; }
+  td { padding: .55rem .75rem; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #fafafa; }
+
+  .tag { display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: .75rem; font-weight: 600; white-space: nowrap; }
+  .impact-critical { background: #f8d7da; color: #721c24; }
+  .impact-high     { background: #fde8d8; color: #7c3e0e; }
+  .impact-medium   { background: #fff3cd; color: #856404; }
+  .impact-low      { background: #d4edda; color: #155724; }
+  .impact-none     { background: #e9ecef; color: #555; }
+
+  .cat-fraud      { background: #e8d5fb; color: #5b21b6; }
+  .cat-captcha    { background: #fee2e2; color: #991b1b; }
+  .cat-maps       { background: #dbeafe; color: #1e40af; }
+  .cat-analytics  { background: #e0f2fe; color: #0369a1; }
+  .cat-advertising{ background: #fef9c3; color: #713f12; }
+  .cat-fonts      { background: #f0fdf4; color: #14532d; }
+  .cat-session    { background: #ede9fe; color: #4c1d95; }
+  .cat-cobrowse   { background: #fce7f3; color: #831843; }
+  .cat-cdn        { background: #f3f4f6; color: #374151; }
+  .cat-crm        { background: #ecfdf5; color: #065f46; }
+
+  .status-ok      { color: #15803d; font-weight: 600; }
+  .status-blocked { color: #dc2626; font-weight: 600; }
+  .status-mixed   { color: #d97706; font-weight: 600; }
+
+  .sessions { display: flex; gap: 4px; flex-wrap: wrap; }
+  .session-dot { width: 20px; height: 20px; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: .7rem; font-weight: 700; color: #fff; }
+  .s-ok   { background: #16a34a; }
+  .s-fail { background: #dc2626; }
+  .s-none { background: #d1d5db; color: #6b7280; }
+
+  .detection-code { font-family: monospace; font-size: .78rem; background: #f1f5f9; padding: 2px 6px; border-radius: 3px; display: block; margin-top: 2px; color: #0f172a; max-width: 340px; white-space: pre-wrap; word-break: break-all; }
+
+  .expand-btn { background: none; border: none; cursor: pointer; color: #0066ff; font-size: .8rem; padding: 0; }
+
+  #import-input { display: none; }
+
+  .note-badge { font-size: .72rem; background: #e0f2fe; color: #0369a1; padding: 1px 5px; border-radius: 3px; margin-left: 4px; }
+
+  .section-label { font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; color: #888; padding: .4rem .75rem .1rem; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Third-Party Service Inventory</h1>
+  <p>Living catalog of every external dependency found on the target page. Drop additional audit JSON files to merge in new sessions.</p>
+</header>
+
+<div class="toolbar">
+  <input type="text" id="filter-text" placeholder="Filter by domain, category, impact...">
+  <select id="filter-impact">
+    <option value="">All impacts</option>
+    <option value="critical">Critical</option>
+    <option value="high">High</option>
+    <option value="medium">Medium</option>
+    <option value="low">Low</option>
+    <option value="none">None</option>
+  </select>
+  <select id="filter-cat">
+    <option value="">All categories</option>
+    <option value="fraud">Fraud / Device ID</option>
+    <option value="captcha">CAPTCHA</option>
+    <option value="maps">Maps / Address</option>
+    <option value="analytics">Analytics</option>
+    <option value="advertising">Advertising</option>
+    <option value="session">Session Replay</option>
+    <option value="cobrowse">Co-browse</option>
+    <option value="fonts">Fonts / CDN</option>
+    <option value="crm">CRM / App</option>
+  </select>
+  <label class="file-drop" id="drop-zone">
+    Drop audit JSON here or <u>click to import</u>
+    <input type="file" id="import-input" accept=".json" multiple>
+  </label>
+  <button id="btn-export-csv">Export CSV</button>
+</div>
+
+<div class="stats">
+  <span class="stat">Services: <strong id="stat-total">—</strong></span>
+  <span class="stat">Critical/High: <strong id="stat-critical">—</strong></span>
+  <span class="stat">Always blocked: <strong id="stat-always-blocked">—</strong></span>
+  <span class="stat">Sometimes blocked: <strong id="stat-sometimes">—</strong></span>
+  <span class="stat">Sessions loaded: <strong id="stat-sessions">—</strong></span>
+</div>
+
+<main>
+  <table id="inventory-table">
+    <thead>
+      <tr>
+        <th data-col="domain">Domain <span class="sort-icon">↕</span></th>
+        <th data-col="category">Category <span class="sort-icon">↕</span></th>
+        <th data-col="impact">Impact <span class="sort-icon">↕</span></th>
+        <th data-col="status">Status <span class="sort-icon">↕</span></th>
+        <th>Sessions</th>
+        <th>What it does</th>
+        <th>Detection check</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</main>
+
+<script>
+/* ---- Seed data: built from two audit sessions ---- */
+const SESSIONS = [
+  { id: 'S1', label: 'S1', desc: 'Page load only (clean Chrome, no extensions)', file: 'page-audit-...1776364083307' },
+  { id: 'S2', label: 'S2', desc: 'Full form flow incl. address search (1Password ext present)', file: 'ABLpage-audit-...1776370495904' },
+];
+
+/* Impact levels: critical = breaks submission, high = breaks key UX, medium = degrades, low/none = analytics only */
+let SERVICES = [
+  {
+    domain: 'mpsnare.iesnare.com',
+    vendor: 'iovation / TransUnion',
+    category: 'fraud',
+    impact: 'critical',
+    description: 'Device fingerprinting and fraud risk scoring. Bank uses this score to approve/deny account opening.',
+    resourceTypes: ['script'],
+    sessions: { S1: 'blocked', S2: 'blocked' },
+    detection: `// iovation injects window.io_bb_callback and window.IGLOO\ntypeof window.IGLOO !== 'undefined' || typeof window.io_bb_callback !== 'undefined'`,
+    notes: 'Blocked in both sessions. If backend requires a blackbox token, form will silently fail or return generic error.',
+  },
+  {
+    domain: 'www.google.com/recaptcha',
+    vendor: 'Google reCAPTCHA Enterprise',
+    category: 'captcha',
+    impact: 'critical',
+    description: 'Invisible CAPTCHA on form submission. If blocked, no token is generated and Apex backend will reject submit.',
+    resourceTypes: ['script', 'iframe', 'fetch'],
+    sessions: { S1: 'blocked', S2: 'blocked' },
+    detection: `// reCAPTCHA enterprise exposes window.grecaptcha.enterprise\ntypeof window.grecaptcha !== 'undefined' && typeof window.grecaptcha.enterprise !== 'undefined'`,
+    notes: 'enterprise.js blocked (status 0). The recaptcha__en.js from gstatic loads fine — but the parent loader is blocked so token cannot be issued.',
+  },
+  {
+    domain: 'maps.googleapis.com',
+    vendor: 'Google Maps / Places',
+    category: 'maps',
+    impact: 'high',
+    description: 'Address autocomplete on application form. Blocked = user must type full address manually; may also cause JS errors if app depends on Places callback.',
+    resourceTypes: ['script', 'xmlhttprequest', 'other'],
+    sessions: { S1: 'absent', S2: 'blocked' },
+    detection: `// Google Maps Places is loaded if this exists\ntypeof window.google !== 'undefined' && typeof window.google.maps !== 'undefined' && typeof window.google.maps.places !== 'undefined'`,
+    notes: 'Only appears in S2 (form interaction triggered it). All Maps API calls status 0. Script tags removed from DOM by Google\'s own cleanup.',
+  },
+  {
+    domain: 'metric.terafinainc.net',
+    vendor: 'Terafina (Salesforce ISV)',
+    category: 'crm',
+    impact: 'high',
+    description: 'Application platform analytics and step-tracking. The entire form runs on Terafina. These XHR calls are step completion pings — if blocked, may affect flow state.',
+    resourceTypes: ['xmlhttprequest'],
+    sessions: { S1: 'absent', S2: 'ok' },
+    detection: `// Check if Terafina collect endpoint is reachable\nfetch('https://metric.terafinainc.net/collect/meta?client=ASB', {method:'GET'}).then(r => r.ok)`,
+    notes: 'Loaded fine in S2. Not a blocker in tested environments but is a first-party app dependency masquerading as a metric endpoint.',
+  },
+  {
+    domain: 'www.glancecdn.net',
+    vendor: 'Glance Networks',
+    category: 'cobrowse',
+    impact: 'medium',
+    description: 'Agent co-browsing for support calls. Blocked = support agents cannot screen-share with user. Not a blocker for self-service flow.',
+    resourceTypes: ['script'],
+    sessions: { S1: 'absent', S2: 'blocked' },
+    detection: `// Glance injects window.GLANCE\ntypeof window.GLANCE !== 'undefined'`,
+    notes: 'Appears in S2 only (loaded later in flow). Status 0 both times it was requested.',
+  },
+  {
+    domain: 'cdn.quantummetric.com',
+    vendor: 'Quantum Metric',
+    category: 'session',
+    impact: 'medium',
+    description: 'Session replay and digital experience analytics. Blocked = no session recording. Not a flow blocker.',
+    resourceTypes: ['script'],
+    sessions: { S1: 'blocked', S2: 'absent' },
+    detection: `// Quantum Metric injects window.QuantumMetricAPI\ntypeof window.QuantumMetricAPI !== 'undefined'`,
+    notes: 'Only in S1. Different session depth may explain absence in S2.',
+  },
+  {
+    domain: 'www.associatedbank.com (Tealeaf)',
+    vendor: 'IBM Tealeaf',
+    category: 'session',
+    impact: 'medium',
+    description: 'Behavioral analytics / session replay. Blocked = no behavioral data. Not a flow blocker.',
+    resourceTypes: ['script'],
+    sessions: { S1: 'blocked', S2: 'absent' },
+    detection: `// Tealeaf injects window.TLT\ntypeof window.TLT !== 'undefined'`,
+    notes: 'Loaded from associatedbank.com main domain, not open subdomain. GTM probably injects it.',
+  },
+  {
+    domain: 'www.googletagmanager.com',
+    vendor: 'Google Tag Manager',
+    category: 'analytics',
+    impact: 'medium',
+    description: 'Tag container that injects GA, Ads, Facebook, TikTok, Bing pixels. Blocking GTM cascades to blocking all downstream tags.',
+    resourceTypes: ['script'],
+    sessions: { S1: 'blocked', S2: 'absent' },
+    detection: `// GTM pushes to window.dataLayer\nArray.isArray(window.dataLayer) && window.dataLayer.length > 0`,
+    notes: 'Status 0 in S1. Completely absent from S2 — cascade effect means all advertising pixels also absent.',
+  },
+  {
+    domain: 'server-side-tagging-633178361708.us-central1.run.app',
+    vendor: 'Google Server-Side GTM',
+    category: 'analytics',
+    impact: 'low',
+    description: 'Server-side tag container running on Google Cloud Run. Proxied GA4/Ads data collection — harder to block than client-side GTM.',
+    resourceTypes: ['fetch'],
+    sessions: { S1: 'ok', S2: 'absent' },
+    detection: `// No reliable client-side signal — check via fetch\nfetch('https://server-side-tagging-633178361708.us-central1.run.app/healthy').then(r=>r.ok).catch(()=>false)`,
+    notes: 'Status 200 in S1 — this is the hard-to-block server-side proxy. A privacy-motivated check may miss this.',
+  },
+  {
+    domain: 'googleads.g.doubleclick.net',
+    vendor: 'Google Ads (conversion)',
+    category: 'advertising',
+    impact: 'low',
+    description: 'Google Ads conversion tracking pixel. Blocked = conversion not recorded. No UX impact.',
+    resourceTypes: ['script'],
+    sessions: { S1: 'ok', S2: 'absent' },
+    detection: `// DoubleClick sets window.google_tag_data\ntypeof window.google_tag_data !== 'undefined'`,
+    notes: 'Status 200 in S1 (came through via GTM). Absent in S2.',
+  },
+  {
+    domain: 'connect.facebook.net',
+    vendor: 'Meta Pixel',
+    category: 'advertising',
+    impact: 'low',
+    description: 'Facebook/Meta conversion and audience pixel. Blocked = no attribution. No UX impact.',
+    resourceTypes: ['script'],
+    sessions: { S1: 'blocked', S2: 'absent' },
+    detection: `// Meta pixel injects window.fbq\ntypeof window.fbq !== 'undefined'`,
+    notes: 'Blocked in S1. One of the most-blocked third-party scripts across all blocklists.',
+  },
+  {
+    domain: 'analytics.tiktok.com',
+    vendor: 'TikTok Pixel',
+    category: 'advertising',
+    impact: 'none',
+    description: 'TikTok ad conversion tracking. No UX impact.',
+    resourceTypes: ['script'],
+    sessions: { S1: 'blocked', S2: 'absent' },
+    detection: `typeof window.ttq !== 'undefined'`,
+    notes: '',
+  },
+  {
+    domain: 'bat.bing.com',
+    vendor: 'Microsoft Bing Ads',
+    category: 'advertising',
+    impact: 'none',
+    description: 'Bing/Microsoft ad conversion tracking. No UX impact.',
+    resourceTypes: ['script'],
+    sessions: { S1: 'blocked', S2: 'absent' },
+    detection: `typeof window.uetq !== 'undefined'`,
+    notes: '',
+  },
+  {
+    domain: 'static.ads-twitter.com',
+    vendor: 'Twitter/X Ads',
+    category: 'advertising',
+    impact: 'none',
+    description: 'Twitter ad conversion pixel. No UX impact.',
+    resourceTypes: ['script'],
+    sessions: { S1: 'blocked', S2: 'absent' },
+    detection: `typeof window.twq !== 'undefined'`,
+    notes: '',
+  },
+  {
+    domain: 'cdn01.basis.net',
+    vendor: 'Basis Technologies (Centro)',
+    category: 'advertising',
+    impact: 'none',
+    description: 'Programmatic ad platform tracking pixel. No UX impact.',
+    resourceTypes: ['script'],
+    sessions: { S1: 'blocked', S2: 'absent' },
+    detection: `// No standard global — check script tag presence`,
+    notes: '',
+  },
+  {
+    domain: 'trkn.us',
+    vendor: 'Unknown tracking pixel',
+    category: 'advertising',
+    impact: 'none',
+    description: 'Third-party conversion/retargeting pixel. No UX impact.',
+    resourceTypes: ['img'],
+    sessions: { S1: 'blocked', S2: 'absent' },
+    detection: `// Image pixel — no JS global`,
+    notes: 'Unknown vendor. Pixel URL pattern suggests retargeting.',
+  },
+  {
+    domain: 'www.google-analytics.com',
+    vendor: 'Google Analytics (UA)',
+    category: 'analytics',
+    impact: 'none',
+    description: 'Legacy Universal Analytics. Largely deprecated. No UX impact.',
+    resourceTypes: ['script', 'xmlhttprequest'],
+    sessions: { S1: 'blocked', S2: 'absent' },
+    detection: `typeof window.ga !== 'undefined'`,
+    notes: '',
+  },
+  {
+    domain: 'fonts.googleapis.com',
+    vendor: 'Google Fonts',
+    category: 'fonts',
+    impact: 'low',
+    description: 'Material Icons and Montserrat font family. Blocked = icons replaced with text labels or missing, font falls back to system font.',
+    resourceTypes: ['other', 'css', 'link'],
+    sessions: { S1: 'blocked', S2: 'blocked' },
+    detection: `// Check if Material Icons loaded\ndocument.fonts.check('1em Material Icons')`,
+    notes: 'Blocked in both sessions. Visual degradation only.',
+  },
+  {
+    domain: 'fonts.gstatic.com',
+    vendor: 'Google Fonts (static)',
+    category: 'fonts',
+    impact: 'low',
+    description: 'Actual font/icon woff2 files served from gstatic CDN.',
+    resourceTypes: ['css'],
+    sessions: { S1: 'ok', S2: 'absent' },
+    detection: `document.fonts.check('1em "Material Symbols Outlined"')`,
+    notes: 'Status 200 in S1. If fonts.googleapis.com CSS blocked, woff2 never requested.',
+  },
+  {
+    domain: 'associatedbankfsc.my.salesforce-sites.com',
+    vendor: 'Salesforce Sites (AB assets)',
+    category: 'crm',
+    impact: 'low',
+    description: 'AB logo, favicon, loading spinner image served from Salesforce community. Visual assets only.',
+    resourceTypes: ['css', 'other'],
+    sessions: { S1: 'blocked', S2: 'blocked' },
+    detection: `// Check if logo image loads\nconst img = new Image(); img.src='https://associatedbankfsc.my.salesforce-sites.com/file-asset/ASB_logo'; img.onload=()=>true; img.onerror=()=>false`,
+    notes: 'Status 0 in both sessions — possibly a Salesforce cross-origin restriction, not necessarily a blocker.',
+  },
+  {
+    domain: 'extend.vimeocdn.com',
+    vendor: 'Vimeo CDN',
+    category: 'cdn',
+    impact: 'low',
+    description: 'Vimeo analytics/player extension. Likely for an embedded video on the page. Blocked = video may not load.',
+    resourceTypes: ['script'],
+    sessions: { S1: 'ok', S2: 'absent' },
+    detection: `typeof window.Vimeo !== 'undefined'`,
+    notes: 'Status 200 in S1.',
+  },
+  {
+    domain: 'unpkg.com',
+    vendor: 'unpkg CDN',
+    category: 'cdn',
+    impact: 'low',
+    description: 'web-vitals library loaded from public CDN. Used for Core Web Vitals reporting.',
+    resourceTypes: ['script'],
+    sessions: { S1: 'blocked', S2: 'absent' },
+    detection: `typeof window.webVitals !== 'undefined'`,
+    notes: 'Public CDN — commonly blocked as a tracking vector.',
+  },
+  {
+    domain: 'www.gstatic.com',
+    vendor: 'Google Static CDN',
+    category: 'cdn',
+    impact: 'low',
+    description: 'Hosts the actual reCAPTCHA JS bundle after the loader (enterprise.js) redirects to it.',
+    resourceTypes: ['script'],
+    sessions: { S1: 'ok', S2: 'ok' },
+    detection: `// Loads if recaptcha enterprise.js was allowed\ntypeof window.grecaptcha !== 'undefined'`,
+    notes: 'Status 200 in both sessions. Not on blocklists — only blocked if enterprise.js (the loader) was blocked first.',
+  },
+];
+
+/* ---- Merge audit JSON into session status ---- */
+function mergeAudit(data, sessionId) {
+  if (!SESSIONS.find(s => s.id === sessionId)) {
+    SESSIONS.push({ id: sessionId, label: 'S' + SESSIONS.length, desc: 'Imported session', file: sessionId });
+  }
+  const seen = {};
+  (data.resources || []).forEach(r => {
+    try {
+      const host = new URL(r.url).host;
+      if (!seen[host]) seen[host] = { statuses: [] };
+      seen[host].statuses.push(r.status);
+    } catch {}
+  });
+  (data.intercepted || []).forEach(r => {
+    try {
+      const url = r.url.startsWith('http') ? r.url : location.origin + r.url;
+      const host = new URL(url).host;
+      if (!seen[host]) seen[host] = { statuses: [] };
+      seen[host].statuses.push(r.status);
+    } catch {}
+  });
+
+  Object.entries(seen).forEach(([host, {statuses}]) => {
+    const isBlocked = statuses.every(s => s === 0 || s === 'blocked');
+    const isOk = statuses.some(s => s === 200);
+    const state = isBlocked ? 'blocked' : isOk ? 'ok' : 'blocked';
+
+    // Find matching service
+    const svc = SERVICES.find(s => s.domain.includes(host) || host.includes(s.domain.split('/')[0]));
+    if (svc) {
+      svc.sessions[sessionId] = state;
+    } else {
+      // Add new service
+      SERVICES.push({
+        domain: host,
+        vendor: host,
+        category: 'cdn',
+        impact: 'none',
+        description: 'Discovered via import — classify manually.',
+        resourceTypes: [],
+        sessions: { [sessionId]: state },
+        detection: `// TODO`,
+        notes: 'Auto-imported',
+      });
+    }
+  });
+
+  render();
+  updateStats();
+}
+
+/* ---- Rendering ---- */
+const IMPACT_ORDER = { critical: 0, high: 1, medium: 2, low: 3, none: 4 };
+let sortCol = 'impact', sortDir = 1;
+
+function sessionDots(svc) {
+  return SESSIONS.map(s => {
+    const state = svc.sessions[s.id];
+    const cls = state === 'ok' ? 's-ok' : state === 'blocked' ? 's-fail' : 's-none';
+    const title = state ? `${s.label}: ${state} — ${s.desc}` : `${s.label}: not seen`;
+    return `<span class="session-dot ${cls}" title="${title}">${s.label}</span>`;
+  }).join('');
+}
+
+function overallStatus(svc) {
+  const states = Object.values(svc.sessions).filter(Boolean);
+  if (!states.length) return '<span class="status-blocked">—</span>';
+  const allBlocked = states.every(s => s === 'blocked');
+  const allOk = states.every(s => s === 'ok');
+  if (allBlocked) return '<span class="status-blocked">Always blocked</span>';
+  if (allOk) return '<span class="status-ok">Always loads</span>';
+  return '<span class="status-mixed">Mixed</span>';
+}
+
+function render() {
+  const filter = document.getElementById('filter-text').value.toLowerCase();
+  const impactF = document.getElementById('filter-impact').value;
+  const catF = document.getElementById('filter-cat').value;
+
+  let rows = SERVICES.filter(s => {
+    if (impactF && s.impact !== impactF) return false;
+    if (catF && s.category !== catF) return false;
+    if (filter && !s.domain.toLowerCase().includes(filter) && !s.vendor.toLowerCase().includes(filter)
+        && !s.description.toLowerCase().includes(filter) && !s.category.includes(filter)) return false;
+    return true;
+  });
+
+  rows.sort((a, b) => {
+    let av = a[sortCol], bv = b[sortCol];
+    if (sortCol === 'impact') { av = IMPACT_ORDER[a.impact]; bv = IMPACT_ORDER[b.impact]; }
+    if (av < bv) return -sortDir;
+    if (av > bv) return sortDir;
+    return 0;
+  });
+
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = rows.map(s => `
+    <tr>
+      <td>
+        <strong>${s.domain}</strong><br>
+        <span style="color:#666;font-size:.78rem;">${s.vendor}</span>
+        ${s.notes ? `<span class="note-badge" title="${s.notes}">note</span>` : ''}
+      </td>
+      <td><span class="tag cat-${s.category}">${s.category}</span></td>
+      <td><span class="tag impact-${s.impact}">${s.impact}</span></td>
+      <td>${overallStatus(s)}</td>
+      <td><div class="sessions">${sessionDots(s)}</div></td>
+      <td style="max-width:280px;font-size:.82rem;">${s.description}</td>
+      <td><code class="detection-code">${escHtml(s.detection)}</code></td>
+    </tr>
+  `).join('');
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function updateStats() {
+  const total = SERVICES.length;
+  const crit = SERVICES.filter(s => s.impact === 'critical' || s.impact === 'high').length;
+  const alwaysBlocked = SERVICES.filter(s => {
+    const states = Object.values(s.sessions).filter(Boolean);
+    return states.length > 0 && states.every(s => s === 'blocked');
+  }).length;
+  const mixed = SERVICES.filter(s => {
+    const states = Object.values(s.sessions).filter(Boolean);
+    return states.includes('ok') && states.includes('blocked');
+  }).length;
+  document.getElementById('stat-total').textContent = total;
+  document.getElementById('stat-critical').textContent = crit;
+  document.getElementById('stat-always-blocked').textContent = alwaysBlocked;
+  document.getElementById('stat-sometimes').textContent = mixed;
+  document.getElementById('stat-sessions').textContent = SESSIONS.length;
+}
+
+/* ---- Sort ---- */
+document.querySelectorAll('th[data-col]').forEach(th => {
+  th.addEventListener('click', () => {
+    if (sortCol === th.dataset.col) sortDir *= -1;
+    else { sortCol = th.dataset.col; sortDir = 1; }
+    document.querySelectorAll('th').forEach(t => t.classList.remove('sorted'));
+    th.classList.add('sorted');
+    th.querySelector('.sort-icon').textContent = sortDir === 1 ? '↓' : '↑';
+    render();
+  });
+});
+
+/* ---- Filters ---- */
+document.getElementById('filter-text').addEventListener('input', render);
+document.getElementById('filter-impact').addEventListener('change', render);
+document.getElementById('filter-cat').addEventListener('change', render);
+
+/* ---- File import ---- */
+function handleFiles(files) {
+  Array.from(files).forEach(file => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        const sessionId = 'S' + (SESSIONS.length + 1);
+        mergeAudit(data, sessionId);
+        alert('Imported ' + file.name + ' as ' + sessionId);
+      } catch { alert('Invalid JSON: ' + file.name); }
+    };
+    reader.readAsText(file);
+  });
+}
+
+document.getElementById('import-input').addEventListener('change', e => handleFiles(e.target.files));
+document.getElementById('drop-zone').addEventListener('click', () => document.getElementById('import-input').click());
+document.getElementById('drop-zone').addEventListener('dragover', e => { e.preventDefault(); e.currentTarget.classList.add('drag-over'); });
+document.getElementById('drop-zone').addEventListener('dragleave', e => e.currentTarget.classList.remove('drag-over'));
+document.getElementById('drop-zone').addEventListener('drop', e => {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  handleFiles(e.dataTransfer.files);
+});
+
+/* ---- CSV export ---- */
+document.getElementById('btn-export-csv').addEventListener('click', () => {
+  const headers = ['Domain', 'Vendor', 'Category', 'Impact', 'Status', ...SESSIONS.map(s => s.label), 'Description', 'Detection'];
+  const rows = SERVICES.map(s => [
+    s.domain, s.vendor, s.category, s.impact,
+    Object.values(s.sessions).every(v => v === 'blocked') ? 'always blocked' : 'variable',
+    ...SESSIONS.map(sess => s.sessions[sess.id] || 'absent'),
+    s.description.replace(/,/g, ';'),
+    s.detection.replace(/\n/g, ' ').replace(/,/g, ';'),
+  ]);
+  const csv = [headers, ...rows].map(r => r.map(c => `"${c}"`).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'service-inventory.csv';
+  a.click();
+});
+
+/* ---- Init ---- */
+render();
+updateStats();
+</script>
+</body>
+</html>
