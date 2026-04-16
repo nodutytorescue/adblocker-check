@@ -251,6 +251,66 @@
     },
 
     {
+      id: 'alloy',
+      label: 'Alloy Identity Verification',
+      impact: 'ID verification iframe will not render — flow cannot complete',
+      run: () => new Promise(resolve => {
+        // Already loaded?
+        if (window.Alloy) {
+          return resolve({ status: 'pass', detail: 'Alloy SDK global already present' });
+        }
+        let apiOk = false;
+        let sdkOk = false;
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          if (apiOk && sdkOk) {
+            resolve({ status: 'pass', detail: 'API reachable and SDK loaded' });
+          } else if (!apiOk && !sdkOk) {
+            resolve({ status: 'fail', detail: 'API and SDK both blocked — verification cannot start' });
+          } else if (!sdkOk) {
+            resolve({ status: 'fail', detail: 'alloysdk.alloy.co blocked — iframe will not render' });
+          } else {
+            resolve({ status: 'fail', detail: 'docv-prod-api.alloy.co unreachable — auth will fail' });
+          }
+        };
+
+        // 1. API reachability — HEAD request avoids triggering a real session
+        fetch('https://docv-prod-api.alloy.co/health', { method: 'HEAD', mode: 'no-cors' })
+          .then(() => { apiOk = true; })
+          .catch(() => { apiOk = false; })
+          .finally(() => { if (sdkSettled) finish(); sdkSettled = true; });
+
+        // 2. SDK script load
+        let sdkSettled = false;
+        const s = document.createElement('script');
+        s.src = 'https://alloysdk.alloy.co/v2/alloy.js?t=' + Date.now();
+        const timer = setTimeout(() => {
+          s.remove();
+          sdkOk = false;
+          sdkSettled = true;
+          finish();
+        }, 5000);
+        s.onload = () => {
+          clearTimeout(timer);
+          s.remove();
+          sdkOk = true;
+          sdkSettled = true;
+          finish();
+        };
+        s.onerror = () => {
+          clearTimeout(timer);
+          s.remove();
+          sdkOk = false;
+          sdkSettled = true;
+          finish();
+        };
+        document.head.appendChild(s);
+      }),
+    },
+
+    {
       id: 'tealeaf',
       label: 'IBM Tealeaf',
       impact: 'Behavioral analytics and session replay unavailable',
