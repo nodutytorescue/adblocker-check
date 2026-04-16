@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ad Blocker / Privacy Browser Detection PoC</title>
+<style>
+  /* ---- page styles ---- */
+  body { font-family: system-ui, -apple-system, sans-serif; margin: 2rem; color: #1a1a1a; }
+  h1 { margin-bottom: .25rem; }
+  .subtitle { color: #666; margin-bottom: 2rem; }
+  #results { max-width: 640px; }
+  .check { display: flex; justify-content: space-between; padding: .6rem 0; border-bottom: 1px solid #e5e5e5; }
+  .check-name { font-weight: 500; }
+  .tag { padding: 2px 8px; border-radius: 4px; font-size: .85rem; font-weight: 600; }
+  .tag-pass { background: #d4edda; color: #155724; }
+  .tag-warn { background: #fff3cd; color: #856404; }
+  .tag-fail { background: #f8d7da; color: #721c24; }
+
+  /* ---- modal ---- */
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 9999; opacity: 0; pointer-events: none; transition: opacity .25s; }
+  .overlay.visible { opacity: 1; pointer-events: auto; }
+  .modal { background: #fff; border-radius: 12px; max-width: 520px; width: 90%; padding: 2rem; box-shadow: 0 8px 30px rgba(0,0,0,.25); }
+  .modal h2 { margin-top: 0; }
+  .modal ul { padding-left: 1.2rem; line-height: 1.7; }
+  .modal button { margin-top: 1rem; padding: .55rem 1.4rem; border: none; border-radius: 6px; background: #0066ff; color: #fff; font-size: .95rem; cursor: pointer; }
+  .modal button:hover { background: #0052cc; }
+</style>
+</head>
+<body>
+
+<h1>Ad Blocker / Privacy Browser Check</h1>
+<p class="subtitle">Proof of concept &mdash; detection results appear below.</p>
+<div id="results"></div>
+
+<!-- Modal -->
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <h2>Heads up</h2>
+    <p>We detected settings that may cause parts of this site to break:</p>
+    <ul id="modal-issues"></ul>
+    <p style="font-size:.9rem;color:#555;">
+      If something looks wrong, try disabling your ad blocker or shields for this site,
+      or switch to a standard browser profile.
+    </p>
+    <button id="modal-dismiss">Got it</button>
+  </div>
+</div>
+
+<!-- Bait elements (ad blockers hide or remove these) -->
+<div id="ad-container" style="position:absolute;left:-9999px;top:-9999px;">
+  <div class="ad_unit ad-zone textads banner-ads adsbox" id="ad-banner"
+       style="width:1px;height:1px;position:absolute;">ad placeholder</div>
+  <div class="sponsored-content ad-placement pub_300x250"
+       style="width:1px;height:1px;position:absolute;">ad placeholder 2</div>
+</div>
+
+<script>
+(function () {
+  const checks = [];
+  const issues = [];
+
+  function record(name, status, detail) {
+    checks.push({ name, status, detail });
+    if (status === 'fail' || status === 'warn') issues.push(detail || name);
+  }
+
+  /* ---- 1. Brave browser ---- */
+  function detectBrave() {
+    return navigator.brave && typeof navigator.brave.isBrave === 'function'
+      ? navigator.brave.isBrave().then(v => v)
+      : Promise.resolve(false);
+  }
+
+  /* ---- 2. Bait-element ad blocker detection ---- */
+  function detectBaitHidden() {
+    const el = document.getElementById('ad-banner');
+    if (!el) return true; // removed from DOM entirely
+    const style = window.getComputedStyle(el);
+    return el.offsetHeight === 0
+      || style.display === 'none'
+      || style.visibility === 'hidden'
+      || style.opacity === '0';
+  }
+
+  /* ---- 3. Fake ad script fetch ---- */
+  function detectScriptBlock() {
+    return new Promise(resolve => {
+      const s = document.createElement('script');
+      s.src = 'https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js';
+      s.async = true;
+      s.onerror = () => resolve(true);   // blocked
+      s.onload = () => resolve(false);
+      // If nothing fires in 3 s, assume blocked
+      const timer = setTimeout(() => resolve(true), 3000);
+      s.addEventListener('load', () => clearTimeout(timer));
+      s.addEventListener('error', () => clearTimeout(timer));
+      document.head.appendChild(s);
+    });
+  }
+
+  /* ---- 4. Tracking pixel fetch ---- */
+  function detectPixelBlock() {
+    return new Promise(resolve => {
+      const img = new Image();
+      img.src = 'https://www.facebook.com/tr/?noscript=1&_t=' + Date.now();
+      img.onload = () => resolve(false);
+      img.onerror = () => resolve(true);
+      setTimeout(() => resolve(true), 3000);
+    });
+  }
+
+  /* ---- 5. navigator.globalPrivacyControl ---- */
+  function detectGPC() {
+    return navigator.globalPrivacyControl === true;
+  }
+
+  /* ---- 6. navigator.doNotTrack ---- */
+  function detectDNT() {
+    return navigator.doNotTrack === '1' || window.doNotTrack === '1';
+  }
+
+  /* ---- 7. Canvas fingerprint blocking ---- */
+  function detectCanvasBlock() {
+    try {
+      const c = document.createElement('canvas');
+      c.width = 200; c.height = 50;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#f60';
+      ctx.fillRect(0, 0, 200, 50);
+      ctx.fillStyle = '#069';
+      ctx.font = '18px Arial';
+      ctx.fillText('fingerprint test', 2, 35);
+      const d = c.toDataURL();
+      // Brave/privacy extensions may return a blank or randomized data URL
+      return d === 'data:,' || d.length < 100;
+    } catch { return true; }
+  }
+
+  /* ---- 8. WebRTC leak protection ---- */
+  function detectWebRTCBlock() {
+    return new Promise(resolve => {
+      try {
+        const pc = new RTCPeerConnection({ iceServers: [] });
+        pc.createDataChannel('');
+        pc.createOffer().then(o => pc.setLocalDescription(o)).catch(() => resolve(true));
+        const timer = setTimeout(() => { pc.close(); resolve(true); }, 3000);
+        pc.onicecandidate = e => {
+          if (!e || !e.candidate) return;
+          clearTimeout(timer);
+          pc.close();
+          // If candidate is mDNS (.local) the real IP is hidden
+          resolve(/\.local$/.test(e.candidate.candidate.split(' ')[4] || ''));
+        };
+      } catch { resolve(true); }
+    });
+  }
+
+  /* ---- run all checks ---- */
+  async function run() {
+    // Brave
+    const isBrave = await detectBrave();
+    record('Brave browser detected', isBrave ? 'fail' : 'pass',
+      isBrave ? 'Brave Shields may block scripts, cookies, and fingerprinting APIs this site relies on.' : null);
+
+    // Bait element
+    const baitHidden = detectBaitHidden();
+    record('Ad-bait element hidden/removed', baitHidden ? 'fail' : 'pass',
+      baitHidden ? 'An ad blocker is hiding page elements — embedded widgets or sponsor sections may not render.' : null);
+
+    // Script block
+    const scriptBlocked = await detectScriptBlock();
+    record('Ad network script blocked', scriptBlocked ? 'warn' : 'pass',
+      scriptBlocked ? 'Third-party ad scripts are blocked — analytics or embedded content may be missing.' : null);
+
+    // Pixel block
+    const pixelBlocked = await detectPixelBlock();
+    record('Tracking pixel blocked', pixelBlocked ? 'warn' : 'pass',
+      pixelBlocked ? 'Tracking pixels are blocked — some cross-site integrations may fail.' : null);
+
+    // GPC
+    const gpc = detectGPC();
+    record('Global Privacy Control (GPC)', gpc ? 'warn' : 'pass',
+      gpc ? 'GPC is enabled — the browser is requesting limited data collection.' : null);
+
+    // DNT
+    const dnt = detectDNT();
+    record('Do Not Track (DNT)', dnt ? 'warn' : 'pass',
+      dnt ? 'DNT header is set — some personalization features may be disabled.' : null);
+
+    // Canvas fingerprint
+    const canvasBlocked = detectCanvasBlock();
+    record('Canvas fingerprinting blocked', canvasBlocked ? 'warn' : 'pass',
+      canvasBlocked ? 'Canvas API is returning randomized/empty data — CAPTCHA or fraud-detection may break.' : null);
+
+    // WebRTC
+    const webrtcHidden = await detectWebRTCBlock();
+    record('WebRTC IP hidden (mDNS)', webrtcHidden ? 'warn' : 'pass',
+      webrtcHidden ? 'Real IP is masked via mDNS — WebRTC-based features (video calls, P2P) may have connectivity issues.' : null);
+
+    render();
+  }
+
+  /* ---- render results table + modal ---- */
+  function render() {
+    const container = document.getElementById('results');
+    checks.forEach(c => {
+      const row = document.createElement('div');
+      row.className = 'check';
+      const tagClass = c.status === 'pass' ? 'tag-pass' : c.status === 'warn' ? 'tag-warn' : 'tag-fail';
+      const label = c.status === 'pass' ? 'OK' : c.status === 'warn' ? 'WARN' : 'BLOCKED';
+      row.innerHTML = `<span class="check-name">${c.name}</span><span class="tag ${tagClass}">${label}</span>`;
+      container.appendChild(row);
+    });
+
+    // Show modal if any issues detected
+    if (issues.length > 0) {
+      const list = document.getElementById('modal-issues');
+      issues.forEach(i => {
+        const li = document.createElement('li');
+        li.textContent = i;
+        list.appendChild(li);
+      });
+      document.getElementById('overlay').classList.add('visible');
+    }
+  }
+
+  document.getElementById('modal-dismiss').addEventListener('click', () => {
+    document.getElementById('overlay').classList.remove('visible');
+  });
+
+  run();
+})();
+</script>
+</body>
+</html>
