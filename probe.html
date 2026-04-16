@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>App Compatibility Probe</title>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; max-width: 680px; margin: 3rem auto; padding: 0 1.5rem; color: #1a1a1a; }
+  h1 { font-size: 1.4rem; margin-bottom: .25rem; }
+  p { color: #555; line-height: 1.6; margin-bottom: 1.25rem; }
+
+  .card { border: 1px solid #e2e8f0; border-radius: 10px; padding: 1.25rem 1.5rem; margin-bottom: 1.25rem; }
+  .card h2 { font-size: 1rem; margin-bottom: .6rem; }
+
+  .bookmarklet-btn {
+    display: inline-block; padding: .6rem 1.2rem; background: #1e293b; color: #fff;
+    border-radius: 7px; text-decoration: none; font-weight: 600; font-size: .95rem;
+    cursor: grab; border: 2px dashed transparent;
+  }
+  .bookmarklet-btn:hover { background: #334155; }
+
+  pre {
+    background: #0f172a; color: #7dd3fc; padding: 1rem 1.25rem; border-radius: 8px;
+    font-size: .8rem; overflow-x: auto; white-space: pre-wrap; word-break: break-all;
+    max-height: 220px; overflow-y: auto;
+    user-select: all;
+  }
+
+  .steps { counter-reset: steps; list-style: none; padding: 0; }
+  .steps li { counter-increment: steps; padding: .4rem 0 .4rem 2rem; position: relative; color: #444; font-size: .95rem; }
+  .steps li::before { content: counter(steps); position: absolute; left: 0; top: .45rem; width: 1.3rem; height: 1.3rem; background: #6366f1; color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: .72rem; font-weight: 700; }
+
+  .checks-table { width: 100%; border-collapse: collapse; font-size: .88rem; margin-top: .5rem; }
+  .checks-table th { text-align: left; padding: .4rem .5rem; border-bottom: 2px solid #e2e8f0; color: #64748b; font-weight: 600; }
+  .checks-table td { padding: .45rem .5rem; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+  .tag { padding: 1px 7px; border-radius: 4px; font-size: .75rem; font-weight: 600; }
+  .crit { background: #fee2e2; color: #991b1b; }
+  .high { background: #fde8d8; color: #7c3e0e; }
+  .note { font-size: .78rem; color: #64748b; margin-top: 2px; }
+</style>
+</head>
+<body>
+
+<h1>App Compatibility Probe</h1>
+<p>Checks whether the three services that break <strong>open.associatedbank.com</strong>'s application flow are reachable in the current browser. Results appear as an overlay directly on the page.</p>
+
+<div class="card">
+  <h2>What it checks</h2>
+  <table class="checks-table">
+    <thead><tr><th>Service</th><th>Impact if blocked</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>iovation / iesnare</strong><br><span class="note">mpsnare.iesnare.com</span></td>
+        <td><span class="tag crit">Critical</span><br><span class="note">Device fraud score never sent — backend may silently reject</span></td>
+      </tr>
+      <tr>
+        <td><strong>reCAPTCHA Enterprise</strong><br><span class="note">google.com/recaptcha/enterprise.js</span></td>
+        <td><span class="tag crit">Critical</span><br><span class="note">No token = form submit rejected</span></td>
+      </tr>
+      <tr>
+        <td><strong>Google Maps Places API</strong><br><span class="note">maps.googleapis.com</span></td>
+        <td><span class="tag high">High</span><br><span class="note">Address autocomplete broken, possible JS errors</span></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>Option 1 — Bookmarklet (easiest)</h2>
+  <p style="margin-bottom:.75rem;">Drag this button to your bookmarks bar. Then navigate to the target page and click it.</p>
+  <a id="bookmarklet" class="bookmarklet-btn" href="#">⚡ App Probe</a>
+  <p style="margin-top:.75rem; font-size:.85rem; color:#888;">Works in Chrome, Firefox, Edge. Brave may require you to enable bookmarklets in settings.</p>
+</div>
+
+<div class="card">
+  <h2>Option 2 — Console paste</h2>
+  <ol class="steps">
+    <li>Navigate to <strong>open.associatedbank.com</strong></li>
+    <li>Open DevTools → Console (F12 or ⌘⌥J)</li>
+    <li>Paste the snippet below and press Enter</li>
+  </ol>
+  <pre id="snippet-display">Loading…</pre>
+</div>
+
+<script>
+// Fetch the probe.js source and build the bookmarklet + console snippet
+fetch('probe.js?t=' + Date.now())
+  .then(r => r.text())
+  .then(src => {
+    // Console snippet — raw
+    document.getElementById('snippet-display').textContent = src;
+
+    // Bookmarklet — minify just enough (strip comments, collapse whitespace)
+    const mini = src
+      .replace(/\/\/[^\n]*/g, '')          // strip // comments
+      .replace(/\/\*[\s\S]*?\*\//g, '')    // strip /* */ comments
+      .replace(/\s+/g, ' ')               // collapse whitespace
+      .trim();
+    document.getElementById('bookmarklet').href = 'javascript:' + encodeURIComponent(mini);
+  })
+  .catch(() => {
+    // Fallback if running from file:// or the fetch fails — embed inline
+    document.getElementById('snippet-display').textContent = '// Open this page via a web server, or copy probe.js manually';
+  });
+</script>
+</body>
+</html>
