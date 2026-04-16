@@ -191,6 +191,93 @@
         document.head.appendChild(s);
       }),
     },
+
+    {
+      id: 'glance',
+      label: 'Glance Cobrowse',
+      impact: 'Support agents cannot screen-share with user',
+      run: () => new Promise(resolve => {
+        // Already loaded?
+        if (window.GLANCE && window.GLANCE.Cobrowse) {
+          return resolve({ status: 'pass', detail: 'GLANCE.Cobrowse already present' });
+        }
+        const s = document.createElement('script');
+        s.src = 'https://www.glancecdn.net/cobrowse/CobrowseJS.ashx?group=24479&site=production&t=' + Date.now();
+        const timer = setTimeout(() => {
+          s.remove();
+          resolve({ status: 'fail', detail: 'Script blocked or timed out' });
+        }, 5000);
+        s.onload = () => {
+          clearTimeout(timer);
+          s.remove();
+          resolve({ status: 'pass', detail: 'CobrowseJS loaded successfully' });
+        };
+        s.onerror = () => {
+          clearTimeout(timer);
+          s.remove();
+          resolve({ status: 'fail', detail: 'Script blocked — co-browse unavailable' });
+        };
+        document.head.appendChild(s);
+      }),
+    },
+
+    {
+      id: 'quantum',
+      label: 'Quantum Metric',
+      impact: 'Session replay and UX analytics unavailable',
+      run: () => new Promise(resolve => {
+        // Already loaded?
+        if (window.QuantumMetricAPI || window.QuantumMetricOnload) {
+          return resolve({ status: 'pass', detail: 'QuantumMetricAPI already present' });
+        }
+        const s = document.createElement('script');
+        s.src = 'https://cdn.quantummetric.com/qscripts/quantum-associatedbank.js?t=' + Date.now();
+        const timer = setTimeout(() => {
+          s.remove();
+          resolve({ status: 'fail', detail: 'Script blocked or timed out' });
+        }, 5000);
+        s.onload = () => {
+          clearTimeout(timer);
+          s.remove();
+          resolve({ status: 'pass', detail: 'Quantum Metric script loaded' });
+        };
+        s.onerror = () => {
+          clearTimeout(timer);
+          s.remove();
+          resolve({ status: 'fail', detail: 'Script blocked — session replay unavailable' });
+        };
+        document.head.appendChild(s);
+      }),
+    },
+
+    {
+      id: 'tealeaf',
+      label: 'IBM Tealeaf',
+      impact: 'Behavioral analytics and session replay unavailable',
+      run: () => new Promise(resolve => {
+        // Already loaded?
+        if (window.TLT) {
+          return resolve({ status: 'pass', detail: 'TLT (Tealeaf) global already present' });
+        }
+        const s = document.createElement('script');
+        s.src = 'https://www.associatedbank.com/js/Tealeaf-associatedterafina.js?t=' + Date.now();
+        const timer = setTimeout(() => {
+          s.remove();
+          resolve({ status: 'fail', detail: 'Script blocked or timed out' });
+        }, 5000);
+        s.onload = () => {
+          clearTimeout(timer);
+          s.remove();
+          resolve({ status: 'pass', detail: 'Tealeaf script loaded' });
+        };
+        s.onerror = () => {
+          clearTimeout(timer);
+          s.remove();
+          resolve({ status: 'fail', detail: 'Script blocked — behavioral analytics unavailable' });
+        };
+        document.head.appendChild(s);
+      }),
+    },
   ];
 
   /* ── Render rows (initially as spinners) ─────────────────────────────── */
