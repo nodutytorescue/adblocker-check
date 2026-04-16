@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Page Network Audit</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, sans-serif; margin: 0; color: #1a1a1a; display: flex; flex-direction: column; height: 100vh; }
+  header { padding: 1rem 1.5rem; border-bottom: 1px solid #ddd; }
+  header h1 { margin: 0 0 .25rem; font-size: 1.3rem; }
+  header p { margin: 0; color: #666; font-size: .9rem; }
+
+  .controls { padding: .75rem 1.5rem; display: flex; gap: .75rem; align-items: center; border-bottom: 1px solid #eee; flex-wrap: wrap; }
+  .controls input[type="text"] { flex: 1; min-width: 300px; padding: .5rem .75rem; border: 1px solid #ccc; border-radius: 6px; font-size: .95rem; }
+  .controls button { padding: .5rem 1.2rem; border: none; border-radius: 6px; font-size: .9rem; cursor: pointer; font-weight: 600; }
+  #btn-audit { background: #0066ff; color: #fff; }
+  #btn-audit:hover { background: #0052cc; }
+  #btn-export { background: #e9ecef; color: #333; }
+  #btn-export:hover { background: #dee2e6; }
+  #btn-compare { background: #28a745; color: #fff; }
+  #btn-compare:hover { background: #218838; }
+  .controls label { font-size: .85rem; color: #555; cursor: pointer; }
+
+  .tabs { display: flex; gap: 0; border-bottom: 2px solid #ddd; padding: 0 1.5rem; }
+  .tab { padding: .6rem 1.2rem; cursor: pointer; font-weight: 500; font-size: .9rem; border-bottom: 2px solid transparent; margin-bottom: -2px; color: #666; }
+  .tab.active { color: #0066ff; border-bottom-color: #0066ff; }
+  .tab .count { background: #e9ecef; padding: 1px 6px; border-radius: 10px; font-size: .8rem; margin-left: .4rem; }
+
+  .panel { flex: 1; overflow: auto; padding: 1rem 1.5rem; display: none; }
+  .panel.active { display: block; }
+
+  table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+  th { text-align: left; padding: .5rem .4rem; border-bottom: 2px solid #ddd; position: sticky; top: 0; background: #fff; }
+  td { padding: .4rem; border-bottom: 1px solid #f0f0f0; word-break: break-all; }
+  tr.blocked td { background: #fff5f5; }
+  tr.slow td { background: #fffbeb; }
+
+  .tag { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: .75rem; font-weight: 600; }
+  .tag-ok { background: #d4edda; color: #155724; }
+  .tag-blocked { background: #f8d7da; color: #721c24; }
+  .tag-slow { background: #fff3cd; color: #856404; }
+  .tag-script { background: #cce5ff; color: #004085; }
+  .tag-img { background: #e2d9f3; color: #3b1f7a; }
+  .tag-css { background: #d1ecf1; color: #0c5460; }
+  .tag-xhr { background: #fce4ec; color: #880e4f; }
+  .tag-fetch { background: #f3e5f5; color: #4a148c; }
+  .tag-other { background: #e9ecef; color: #333; }
+
+  #compare-area { padding: 1.5rem; }
+  #compare-area textarea { width: 100%; height: 120px; font-family: monospace; font-size: .8rem; margin-bottom: .75rem; }
+  .diff-item { padding: .4rem .6rem; margin: .2rem 0; border-radius: 4px; font-size: .85rem; font-family: monospace; }
+  .diff-missing { background: #f8d7da; }
+  .diff-extra { background: #d4edda; }
+
+  .summary-cards { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+  .card { padding: 1rem; border-radius: 8px; border: 1px solid #ddd; min-width: 140px; }
+  .card .num { font-size: 1.8rem; font-weight: 700; }
+  .card .label { font-size: .85rem; color: #666; }
+
+  #status { font-size: .85rem; color: #666; padding: .5rem 1.5rem; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Page Network Audit</h1>
+  <p>Enter a URL to audit via iframe, or paste this script into any page's console. Export results from two browsers and compare.</p>
+</header>
+
+<div class="controls">
+  <input type="text" id="url-input" placeholder="https://example.com — page to audit (must allow iframing)">
+  <button id="btn-audit">Audit</button>
+  <button id="btn-export">Export JSON</button>
+  <button id="btn-compare">Compare</button>
+  <label><input type="checkbox" id="chk-bookmarklet"> Show bookmarklet</label>
+</div>
+
+<div id="bookmarklet-area" style="display:none; padding: .75rem 1.5rem; background: #f8f9fa; border-bottom: 1px solid #eee; font-size: .85rem;">
+  <strong>Bookmarklet:</strong> Drag this to your bookmarks bar, then click it on any page:<br>
+  <a id="bookmarklet-link" href="#" style="font-family: monospace; background: #e9ecef; padding: 4px 8px; border-radius: 4px; display: inline-block; margin-top: .4rem;">Audit This Page</a>
+  <br><br>
+  <strong>Console snippet:</strong> Paste this in DevTools on any page:
+  <pre id="console-snippet" style="background:#1a1a1a; color:#4ec9b0; padding:.75rem; border-radius:6px; overflow-x:auto; max-height:200px; margin-top:.4rem; font-size:.8rem;"></pre>
+</div>
+
+<div id="status"></div>
+
+<div class="tabs">
+  <div class="tab active" data-panel="resources">Resources <span class="count" id="count-resources">0</span></div>
+  <div class="tab" data-panel="intercepted">Fetch/XHR <span class="count" id="count-intercepted">0</span></div>
+  <div class="tab" data-panel="dom">DOM Removals <span class="count" id="count-dom">0</span></div>
+  <div class="tab" data-panel="summary">Summary</div>
+  <div class="tab" data-panel="compare">Compare</div>
+</div>
+
+<div class="panel active" id="panel-resources">
+  <table><thead><tr><th>Type</th><th>URL</th><th>Status</th><th>Duration (ms)</th><th>Size</th></tr></thead><tbody id="tbody-resources"></tbody></table>
+</div>
+<div class="panel" id="panel-intercepted">
+  <table><thead><tr><th>Method</th><th>URL</th><th>Status</th><th>Source</th></tr></thead><tbody id="tbody-intercepted"></tbody></table>
+</div>
+<div class="panel" id="panel-dom">
+  <table><thead><tr><th>Tag</th><th>Classes/ID</th><th>Src/Href</th><th>When</th></tr></thead><tbody id="tbody-dom"></tbody></table>
+</div>
+<div class="panel" id="panel-summary">
+  <div class="summary-cards" id="summary-cards"></div>
+  <h3>Domains contacted</h3>
+  <div id="domain-list"></div>
+</div>
+<div class="panel" id="panel-compare">
+  <div id="compare-area">
+    <p>Paste a JSON export from a <strong>clean browser</strong> (no ad blocker) below, then click Compare to diff against the current audit.</p>
+    <textarea id="compare-input" placeholder='Paste JSON export from clean browser here...'></textarea>
+    <button id="btn-run-compare" style="padding:.5rem 1rem; border:none; border-radius:6px; background:#0066ff; color:#fff; cursor:pointer; font-weight:600;">Run Diff</button>
+    <div id="compare-results" style="margin-top:1rem;"></div>
+  </div>
+</div>
+
+<script>
+const state = {
+  resources: [],
+  intercepted: [],
+  domRemovals: [],
+};
+
+/* ---- Tab switching ---- */
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('panel-' + tab.dataset.panel).classList.add('active');
+  });
+});
+
+/* ---- Bookmarklet toggle ---- */
+document.getElementById('chk-bookmarklet').addEventListener('change', e => {
+  document.getElementById('bookmarklet-area').style.display = e.target.checked ? 'block' : 'none';
+});
+
+/* ---- The injectable audit snippet ---- */
+const SNIPPET = `(function(){
+  const _audit = { resources: [], intercepted: [], domRemovals: [], start: Date.now() };
+  window.__pageAudit = _audit;
+
+  /* 1. Capture all resource loads via PerformanceObserver */
+  const po = new PerformanceObserver(list => {
+    list.getEntries().forEach(e => {
+      _audit.resources.push({
+        type: e.initiatorType,
+        url: e.name,
+        duration: Math.round(e.duration),
+        transferSize: e.transferSize || 0,
+        status: (e.responseStatus || (e.transferSize > 0 ? 200 : 0)),
+      });
+    });
+  });
+  po.observe({ type: 'resource', buffered: true });
+
+  /* 2. Monkey-patch fetch */
+  const origFetch = window.fetch;
+  window.fetch = function(...args) {
+    const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || String(args[0]);
+    const method = args[1]?.method || 'GET';
+    const entry = { method, url, source: 'fetch', status: 'pending' };
+    _audit.intercepted.push(entry);
+    return origFetch.apply(this, args).then(r => {
+      entry.status = r.status; return r;
+    }).catch(err => {
+      entry.status = 'blocked'; throw err;
+    });
+  };
+
+  /* 3. Monkey-patch XMLHttpRequest */
+  const origOpen = XMLHttpRequest.prototype.open;
+  const origSend = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.open = function(method, url) {
+    this._auditEntry = { method, url, source: 'xhr', status: 'pending' };
+    _audit.intercepted.push(this._auditEntry);
+    return origOpen.apply(this, arguments);
+  };
+  XMLHttpRequest.prototype.send = function() {
+    this.addEventListener('load', () => { if (this._auditEntry) this._auditEntry.status = this.status; });
+    this.addEventListener('error', () => { if (this._auditEntry) this._auditEntry.status = 'blocked'; });
+    return origSend.apply(this, arguments);
+  };
+
+  /* 4. MutationObserver for removed/hidden nodes */
+  const mo = new MutationObserver(mutations => {
+    mutations.forEach(m => {
+      m.removedNodes.forEach(node => {
+        if (node.nodeType !== 1) return;
+        _audit.domRemovals.push({
+          tag: node.tagName,
+          id: node.id || '',
+          classes: node.className || '',
+          src: node.src || node.href || '',
+          when: Date.now() - _audit.start,
+        });
+      });
+    });
+  });
+  mo.observe(document.documentElement, { childList: true, subtree: true });
+
+  /* 5. Export helper */
+  window.__exportAudit = function() {
+    const data = JSON.stringify(_audit, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'page-audit-' + location.hostname + '-' + Date.now() + '.json';
+    a.click();
+  };
+
+  console.log('[Page Audit] Running. Call __exportAudit() to download results.');
+})();`;
+
+document.getElementById('console-snippet').textContent = SNIPPET;
+
+/* Build bookmarklet */
+const bmCode = 'javascript:' + encodeURIComponent(SNIPPET);
+const bmLink = document.getElementById('bookmarklet-link');
+bmLink.href = bmCode;
+
+/* ---- Audit via iframe ---- */
+document.getElementById('btn-audit').addEventListener('click', () => {
+  const url = document.getElementById('url-input').value.trim();
+  if (!url) return;
+
+  document.getElementById('status').textContent = 'Loading page in hidden iframe...';
+  state.resources = [];
+  state.intercepted = [];
+  state.domRemovals = [];
+
+  /* Use a hidden iframe and inject the snippet */
+  let iframe = document.getElementById('audit-frame');
+  if (iframe) iframe.remove();
+  iframe = document.createElement('iframe');
+  iframe.id = 'audit-frame';
+  iframe.style.cssText = 'position:fixed;left:-9999px;width:1280px;height:800px;';
+  iframe.src = url;
+  document.body.appendChild(iframe);
+
+  iframe.addEventListener('load', () => {
+    try {
+      iframe.contentWindow.eval(SNIPPET);
+      document.getElementById('status').textContent = 'Audit injected. Collecting for 10 seconds...';
+      setTimeout(() => collectFromIframe(iframe), 10000);
+    } catch (e) {
+      document.getElementById('status').textContent =
+        'Cross-origin blocked — use the console snippet or bookmarklet on the target page instead, then export & compare here.';
+    }
+  });
+
+  iframe.addEventListener('error', () => {
+    document.getElementById('status').textContent = 'Failed to load page. Use the console snippet approach instead.';
+  });
+});
+
+function collectFromIframe(iframe) {
+  try {
+    const audit = iframe.contentWindow.__pageAudit;
+    if (audit) {
+      state.resources = audit.resources;
+      state.intercepted = audit.intercepted;
+      state.domRemovals = audit.domRemovals;
+      renderAll();
+      document.getElementById('status').textContent = 'Audit complete. ' + state.resources.length + ' resources captured.';
+    }
+  } catch (e) {
+    document.getElementById('status').textContent = 'Could not read iframe data (cross-origin). Use console snippet instead.';
+  }
+}
+
+/* ---- Import JSON data for rendering ---- */
+function loadAuditData(data) {
+  state.resources = data.resources || [];
+  state.intercepted = data.intercepted || [];
+  state.domRemovals = data.domRemovals || [];
+  renderAll();
+}
+
+/* ---- Rendering ---- */
+function typeTag(type) {
+  const cls = { script: 'tag-script', img: 'tag-img', css: 'tag-css', link: 'tag-css',
+    xmlhttprequest: 'tag-xhr', fetch: 'tag-fetch' }[type] || 'tag-other';
+  return `<span class="tag ${cls}">${type}</span>`;
+}
+
+function statusTag(s) {
+  if (s === 0 || s === 'blocked') return '<span class="tag tag-blocked">BLOCKED</span>';
+  if (s >= 400) return `<span class="tag tag-blocked">${s}</span>`;
+  return `<span class="tag tag-ok">${s}</span>`;
+}
+
+function formatBytes(b) {
+  if (!b) return '—';
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+  return (b / 1048576).toFixed(1) + ' MB';
+}
+
+function shortenUrl(url) {
+  try {
+    const u = new URL(url);
+    const path = u.pathname.length > 60 ? u.pathname.slice(0, 57) + '...' : u.pathname;
+    return u.host + path + u.search.slice(0, 30);
+  } catch { return url.slice(0, 100); }
+}
+
+function renderAll() {
+  // Resources
+  const rBody = document.getElementById('tbody-resources');
+  rBody.innerHTML = '';
+  state.resources.forEach(r => {
+    const tr = document.createElement('tr');
+    if (r.status === 0 || r.status === 'blocked') tr.className = 'blocked';
+    else if (r.duration > 3000) tr.className = 'slow';
+    tr.innerHTML = `<td>${typeTag(r.type)}</td><td title="${r.url}">${shortenUrl(r.url)}</td><td>${statusTag(r.status)}</td><td>${r.duration}</td><td>${formatBytes(r.transferSize)}</td>`;
+    rBody.appendChild(tr);
+  });
+  document.getElementById('count-resources').textContent = state.resources.length;
+
+  // Intercepted
+  const iBody = document.getElementById('tbody-intercepted');
+  iBody.innerHTML = '';
+  state.intercepted.forEach(r => {
+    const tr = document.createElement('tr');
+    if (r.status === 'blocked') tr.className = 'blocked';
+    tr.innerHTML = `<td>${r.method}</td><td title="${r.url}">${shortenUrl(r.url)}</td><td>${statusTag(r.status)}</td><td><span class="tag tag-${r.source}">${r.source}</span></td>`;
+    iBody.appendChild(tr);
+  });
+  document.getElementById('count-intercepted').textContent = state.intercepted.length;
+
+  // DOM removals
+  const dBody = document.getElementById('tbody-dom');
+  dBody.innerHTML = '';
+  state.domRemovals.forEach(r => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${r.tag}</td><td>${r.id ? '#' + r.id : ''} ${r.classes}</td><td>${shortenUrl(r.src || '—')}</td><td>${r.when}ms</td>`;
+    dBody.appendChild(tr);
+  });
+  document.getElementById('count-dom').textContent = state.domRemovals.length;
+
+  // Summary
+  renderSummary();
+}
+
+function renderSummary() {
+  const total = state.resources.length;
+  const blocked = state.resources.filter(r => r.status === 0 || r.status === 'blocked').length;
+  const xhrBlocked = state.intercepted.filter(r => r.status === 'blocked').length;
+  const domRemoved = state.domRemovals.length;
+
+  const cards = document.getElementById('summary-cards');
+  cards.innerHTML = `
+    <div class="card"><div class="num">${total}</div><div class="label">Total resources</div></div>
+    <div class="card" style="border-color:#dc3545;"><div class="num" style="color:#dc3545;">${blocked}</div><div class="label">Resources blocked</div></div>
+    <div class="card" style="border-color:#dc3545;"><div class="num" style="color:#dc3545;">${xhrBlocked}</div><div class="label">Fetch/XHR blocked</div></div>
+    <div class="card" style="border-color:#ffc107;"><div class="num" style="color:#856404;">${domRemoved}</div><div class="label">DOM nodes removed</div></div>
+  `;
+
+  // Domain breakdown
+  const domains = {};
+  state.resources.forEach(r => {
+    try {
+      const host = new URL(r.url).host;
+      if (!domains[host]) domains[host] = { total: 0, blocked: 0 };
+      domains[host].total++;
+      if (r.status === 0 || r.status === 'blocked') domains[host].blocked++;
+    } catch {}
+  });
+  const domainList = document.getElementById('domain-list');
+  domainList.innerHTML = '<table><thead><tr><th>Domain</th><th>Requests</th><th>Blocked</th></tr></thead><tbody>' +
+    Object.entries(domains).sort((a, b) => b[1].total - a[1].total).map(([d, v]) =>
+      `<tr class="${v.blocked ? 'blocked' : ''}"><td>${d}</td><td>${v.total}</td><td>${v.blocked || '—'}</td></tr>`
+    ).join('') + '</tbody></table>';
+}
+
+/* ---- Export ---- */
+document.getElementById('btn-export').addEventListener('click', () => {
+  const data = JSON.stringify(state, null, 2);
+  const blob = new Blob([data], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'page-audit-' + Date.now() + '.json';
+  a.click();
+});
+
+/* ---- Compare ---- */
+document.getElementById('btn-run-compare').addEventListener('click', () => {
+  const raw = document.getElementById('compare-input').value.trim();
+  if (!raw) return;
+  try {
+    const clean = JSON.parse(raw);
+    runCompare(clean);
+  } catch (e) {
+    document.getElementById('compare-results').innerHTML = '<p style="color:red;">Invalid JSON. Paste the full export.</p>';
+  }
+});
+
+document.getElementById('btn-compare').addEventListener('click', () => {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelector('[data-panel="compare"]').classList.add('active');
+  document.getElementById('panel-compare').classList.add('active');
+});
+
+function runCompare(clean) {
+  const cleanUrls = new Set((clean.resources || []).map(r => normalizeUrl(r.url)));
+  const currentUrls = new Set(state.resources.map(r => normalizeUrl(r.url)));
+
+  const missing = [...cleanUrls].filter(u => !currentUrls.has(u));
+  const extra = [...currentUrls].filter(u => !cleanUrls.has(u));
+
+  // Domain-level diff
+  const cleanDomains = new Set();
+  const currentDomains = new Set();
+  (clean.resources || []).forEach(r => { try { cleanDomains.add(new URL(r.url).host); } catch {} });
+  state.resources.forEach(r => { try { currentDomains.add(new URL(r.url).host); } catch {} });
+  const missingDomains = [...cleanDomains].filter(d => !currentDomains.has(d));
+
+  const out = document.getElementById('compare-results');
+  let html = `<h3>Diff: Clean (${cleanUrls.size} resources) vs. Current (${currentUrls.size} resources)</h3>`;
+
+  if (missingDomains.length) {
+    html += `<h4 style="color:#dc3545;">Blocked domains (${missingDomains.length})</h4>`;
+    html += missingDomains.map(d => `<div class="diff-item diff-missing">${d}</div>`).join('');
+  }
+
+  if (missing.length) {
+    html += `<h4 style="color:#dc3545;">Missing in current browser (${missing.length})</h4>`;
+    html += missing.slice(0, 100).map(u => `<div class="diff-item diff-missing">${u}</div>`).join('');
+    if (missing.length > 100) html += `<p>...and ${missing.length - 100} more</p>`;
+  }
+
+  if (extra.length) {
+    html += `<h4 style="color:#28a745;">Extra in current browser (${extra.length})</h4>`;
+    html += extra.slice(0, 50).map(u => `<div class="diff-item diff-extra">${u}</div>`).join('');
+  }
+
+  if (!missing.length && !extra.length) {
+    html += '<p style="color:#28a745; font-weight:600;">No differences detected — same resources loaded.</p>';
+  }
+
+  out.innerHTML = html;
+}
+
+function normalizeUrl(url) {
+  try {
+    const u = new URL(url);
+    // Strip cache-busters and tracking params for cleaner diffs
+    u.searchParams.delete('_');
+    u.searchParams.delete('t');
+    u.searchParams.delete('cb');
+    u.searchParams.delete('nocache');
+    return u.origin + u.pathname + (u.search || '');
+  } catch { return url; }
+}
+
+/* ---- Allow dropping JSON files onto the page ---- */
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => {
+  e.preventDefault();
+  const file = e.dataTransfer.files[0];
+  if (file && file.name.endsWith('.json')) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        loadAuditData(data);
+        document.getElementById('status').textContent = 'Loaded ' + file.name;
+      } catch { document.getElementById('status').textContent = 'Invalid JSON file.'; }
+    };
+    reader.readAsText(file);
+  }
+});
+</script>
+</body>
+</html>
